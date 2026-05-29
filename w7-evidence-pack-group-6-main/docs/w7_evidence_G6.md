@@ -10,7 +10,7 @@
 | -------------------- | --------------------------------------------------------------------------------------------------- |
 | **Group Number**     | Group 6                                                                                             |
 | **Member Names**     | Minh Tuấn · Thành Vinh · Anh Hoàng · Hoàng Nhân · Mạnh Khang · Ngọc Thắng · Đình Thông · Thành Tâm  |
-| **Link Repo**        | [GitHub repo URL](https://github.com/H1eu232/w7-evidence-pack-group-6.git)                          |
+| **Link Repo**        | [GitHub repo URL](https://github.com/NguyenAnhHoangIT/W7-capstone-terraform.git)                          |
 | **Live Demo URL**    | [CloudFront HTTPS URL](https://hexacode.codes)                                                      |
 | **W6 Evidence Pack** | [W6_evidence](https://github.com/H1eu232/w7-evidence-pack-group-6/blob/main/docs/w7_evidence_G6.md) |
 
@@ -139,7 +139,7 @@ StudyBot là một nền tảng SaaS EduTech sử dụng công nghệ RAG, đư�
 ---
 
 ### 4.5 Quan sát Top 3 Cost Driver:
-1. **Amazon Bedrock (Claude 3.5 Haiku + Titan Embeddings)**: Chi phí xử lý token và sync dữ liệu RAG.
+1. **Amazon Bedrock (Claude 3.5 Haiku + Amazon Nova Pro + Cohere Embed Multilingual)**: Chi phí xử lý token chat, quiz generation và sync dữ liệu RAG.
 2. **VPC Endpoints (Interface Endpoints)**: Chi phí duy trì kết nối private bảo mật sang dịch vụ Bedrock theo giờ.
 3. **Amazon CloudFront**: Chi phí phân phối tài nguyên tĩnh và truyền dữ liệu mạng (Data Transfer Out).
 
@@ -159,7 +159,7 @@ StudyBot là một nền tảng SaaS EduTech sử dụng công nghệ RAG, đư�
 
 ![Bedrock Model Access](./images/Model-Access.png)
 
-<sub>Note: Ảnh chụp trang quản lý quyền truy cập mô hình trên Amazon Bedrock, chứng minh quyền sử dụng các dòng mô hình Claude 3.5 Haiku và Titan Embeddings v2 ở trạng thái "Access granted".</sub>
+<sub>Note: Ảnh chụp trang quản lý quyền truy cập mô hình trên Amazon Bedrock, chứng minh quyền sử dụng các dòng mô hình Claude 3.5 Haiku (Chat), Amazon Nova Pro (Quiz) và Cohere Embed Multilingual ở trạng thái "Access granted".</sub>
 
 ---
 
@@ -217,9 +217,9 @@ StudyBot là một nền tảng SaaS EduTech sử dụng công nghệ RAG, đư�
 
 ### 7.3 Infrastructure as Code (IaC) Stack (Bonus Path C)
 
-![CloudFormation IaC Stack](./images/CloudFormationStack.png)
+![Terraform Apply Success](./images/Terraform-Success.png)
 
-<sub>Note: Ảnh chụp trạng thái Stack ở AWS CloudFormation ở trạng thái "CREATE_COMPLETE", chứng minh hạ tầng được quản lý và triển khai tự động qua Code (CDK/Terraform/SAM).</sub>
+<sub>Note: Ảnh chụp kết quả chạy lệnh Terraform apply thành công, xác nhận toàn bộ tài nguyên hạ tầng được triển khai tự động qua Infrastructure as Code.</sub>
 
 ### 7.4 Amazon Bedrock Guardrails Setup (Bonus Path D)
 
@@ -261,26 +261,161 @@ StudyBot là một nền tảng SaaS EduTech sử dụng công nghệ RAG, đư�
 
 ---
 
+## Section 6.5 — Measurement & Decisions
+
+### Decision Block 1 — Hybrid document extraction strategy for StudyBot uploads
+
+**DECISION:**
+StudyBot uses a hybrid extraction strategy for uploaded learning materials. For text-extractable documents such as TXT, MD, and simple PDF files, the Extractor Lambda uses a JavaScript parsing library to extract text directly. For low text-density, scanned, table-heavy, or layout-heavy PDFs, the system falls back to Amazon Textract.
+
+This decision supports the EduTech use case because lecture documents are not always clean text. Some files contain tables, screenshots, slide layouts, scanned pages, or image-based content. A hybrid path lets the system stay cost-aware while still handling non-trivial educational documents.
+
+**ALTERNATIVES CONSIDERED:**
+
+* **Textract for every upload** — eliminated because not every file needs OCR. TXT, MD, and text-extractable PDFs can be parsed faster and cheaper with a JS parser. Using Textract everywhere would increase cost and latency for simple files.
+* **JS parser only** — eliminated because parser-only extraction can miss text inside scanned/image-based pages, tables, or complex slide layouts. This would reduce RAG answer quality because the Knowledge Base would receive incomplete content.
+* **Bedrock Vision for every page** — eliminated because it is unnecessary for ordinary text documents and would increase latency/cost. It is more suitable for figure-heavy or diagram-heavy pages, not the default ingestion path.
+
+**MEASUREMENT:**
+
+* Sample documents tested: [TODO: number of PDFs/TXT/MD tested]
+* JS parser success rate: [TODO: X/Y files]
+* Textract fallback required: [TODO: X/Y files]
+* Average direct parser extraction latency: [TODO: X ms or X sec/file]
+* Average Textract extraction latency: [TODO: X sec/file]
+* Ingestion success rate from raw upload to clean text store: [TODO: X/Y files]
+* Named failure case:
+  * File/query: [TODO: name of sample file or query]
+  * Problem: [TODO: e.g., table/slide text missing when parser-only path was used]
+  * Fix: [TODO: Textract fallback / text-density check / manual re-ingestion]
+  * Result: [TODO: extracted text became available for RAG / citation improved]
+
+**EVIDENCE:**
+
+* `docs/evidence/ingestion/s3_raw_upload.png`
+* `docs/evidence/ingestion/s3_clean_store_output.png`
+* `docs/evidence/ingestion/extractor_lambda_logs.png`
+* `docs/evidence/ingestion/textract_result_sample.json`
+* `docs/evidence/ingestion/document_extraction_benchmark.xlsx`
+
+**TRADE-OFF ACCEPTED:**
+
+* The hybrid path adds more implementation complexity than using only one extraction method.
+* Textract fallback is slower than direct parsing, but it improves reliability for real lecture materials.
+* The team accepts this complexity because StudyBot's core value is answering from actual uploaded study content, not only from clean text files.
+
+---
+
+### Decision Block 2 — S3 Vectors as the vector store for Bedrock Knowledge Base
+
+**DECISION:**
+StudyBot uses Amazon S3 Vectors as the vector store for the Bedrock Knowledge Base. Extracted document chunks are embedded using Cohere Embed Multilingual and stored/retrieved through S3 Vectors for RAG-based Q&A.
+
+This was chosen because the application is a short-horizon hackathon SaaS with low-to-medium demo traffic, serverless architecture, and a strong need for cost discipline. S3 Vectors fits the use case better than running a separate vector database during the demo window.
+
+**ALTERNATIVES CONSIDERED:**
+
+* **OpenSearch Serverless vector collection** — eliminated because it adds more always-on infrastructure and cost. It is powerful for higher-throughput search, but overkill for the demo workload.
+* **Aurora PostgreSQL with pgvector** — eliminated because it introduces relational database setup, connection management, and more operational overhead for Lambda.
+* **Custom vector search in DynamoDB/S3 JSON** — eliminated because it would require custom similarity search logic and would not be a clean managed RAG path.
+
+**MEASUREMENT:**
+
+* Number of uploaded documents indexed into S3 Vectors: `[TODO: number]`
+* Number of chunks generated: `[TODO: number]`
+* Embedding model: `Cohere Embed Multilingual`
+* Retrieval test questions: `[TODO: e.g., 5+ probe questions]`
+* Retrieval hit@K: `[TODO: X/Y correct chunks retrieved]`
+* Average retrieval/generation latency: `[TODO: X sec]`
+* Cost observed in Cost Explorer for vector/RAG storage during demo: `[TODO: $X]`
+
+**EVIDENCE:**
+
+* `docs/evidence/rag/s3_vectors_bucket_or_index.png`
+* `docs/evidence/rag/bedrock_kb_datasource_sync_success.png`
+* `docs/evidence/rag/cohere_embedding_model_config.png`
+* `docs/evidence/rag/retrieval_probe_results.csv`
+* `docs/evidence/rag/sample_answer_with_citation.png`
+
+**TRADE-OFF ACCEPTED:**
+
+* S3 Vectors is cost-efficient and serverless, but it is not the best choice for ultra-low-latency, high-QPS vector search workloads.
+* OpenSearch Serverless would give more advanced search/index controls, but it adds more cost and operational burden.
+* For StudyBot's demo workload, cost discipline and managed Bedrock integration are more important than advanced vector database tuning.
+
+---
+
+### Decision Block 3 — Split model strategy for Chatbot, Quiz, Flashcard, and Embedding
+
+**DECISION:**
+StudyBot uses different Bedrock models for different AI tasks instead of using one model for everything:
+
+* **Claude 3.5 Haiku** for chatbot Q&A because it is fast and cost-efficient for conversational RAG answers.
+* **Amazon Nova Pro** for quiz and flashcard generation because these tasks need stronger structured generation and educational content formatting.
+* **Cohere Embed Multilingual** for embeddings because the learning materials and user questions may include Vietnamese and English content.
+
+This split keeps the chatbot responsive while still using a stronger generation model for study-content creation.
+
+**ALTERNATIVES CONSIDERED:**
+
+* **Use Nova Pro for all tasks** — eliminated because using a stronger model for every chat turn would increase cost and may be unnecessary for simple grounded Q&A.
+* **Use Claude 3.5 Haiku for all tasks** — eliminated because quiz and flashcard generation needs stable structured output, including multiple-choice JSON, correct answers, distractors, and concise explanations.
+* **Use English-only embedding model** — eliminated because StudyBot targets Vietnamese/English learning content, so multilingual retrieval quality matters.
+
+**MEASUREMENT:**
+
+* Chatbot model: `Claude 3.5 Haiku`
+* Quiz/flashcard model: `Amazon Nova Pro`
+* Embedding model: `Cohere Embed Multilingual`
+* Chat response latency average: `[TODO: X sec]`
+* Quiz generation latency average: `[TODO: X sec]`
+* Flashcard generation latency average: `[TODO: X sec]`
+* JSON validity for quiz generation: `[TODO: X/Y successful JSON responses]`
+* Retrieval quality on Vietnamese/English probe questions: `[TODO: X/Y correct retrievals]`
+* Cost comparison during development:
+
+  * Haiku chat cost: `[TODO: $X]`
+  * Nova quiz/flashcard cost: `[TODO: $X]`
+
+**EVIDENCE:**
+
+* `docs/evidence/ai/bedrock_model_access_enabled.png`
+* `docs/evidence/ai/chatbot_haiku_cloudwatch_logs.png`
+* `docs/evidence/ai/nova_quiz_generation_output.json`
+* `docs/evidence/ai/nova_flashcard_generation_output.json`
+* `docs/evidence/ai/cohere_embedding_kb_config.png`
+* `docs/evidence/ai/model_latency_measurement.xlsx`
+
+**TRADE-OFF ACCEPTED:**
+
+* Using multiple models increases configuration complexity and IAM/model-access setup.
+* The backend must handle different response formats for chatbot answers, quiz JSON, and flashcard JSON.
+* The team accepts this because each model is used where it fits best: Haiku for fast chat, Nova Pro for richer educational generation, and Cohere Embed Multilingual for cross-language retrieval.
+
+---
+
 ## Section 9 — Measurement & Decisions (Mục §6.5 chống đối phó)
 
-### Decision Block 1: Lựa chọn mô hình ngôn ngữ lớn (LLM) cho RAG & Quiz Generation
+### Decision Block 1: Lựa chọn mô hình ngôn ngữ lớn (LLM) cho Chat RAG & Quiz Generation
 
 ![Decision Block 1](./images/Block-Decision-1.jpg)
 
 ```
 DECISION: 
-Sử dụng Claude 3.5 Haiku trực tiếp trên Bedrock thay vì dùng Claude 3.5 Sonnet trong quá trình phát triển và chạy thử.
+Sử dụng Claude 3.5 Haiku cho Chat RAG và Amazon Nova Pro cho Quiz Generation trên Bedrock, thay vì dùng một mô hình duy nhất cho cả hai tác vụ.
 
 ALTERNATIVES CONSIDERED:
-- Claude 3.5 Sonnet: Loại bỏ vì chi phí token quá cao ($3.00/$15.00 per 1M tokens input/output) dẫn đến nguy cơ vượt ngân sách khi gọi test liên tục.
+- Claude 3.5 Sonnet (cho cả hai): Loại bỏ vì chi phí token quá cao ($3.00/$15.00 per 1M tokens input/output) dẫn đến nguy cơ vượt ngân sách khi gọi test liên tục.
 - Amazon Titan Text Express: Loại bỏ vì độ chính xác trong việc trích xuất thông tin tiếng Việt và lập luận câu hỏi trắc nghiệm dưới dạng cấu trúc JSON không ổn định.
+- Claude 3.5 Haiku cho Quiz: Loại bỏ vì Nova Pro cho output JSON cấu trúc quiz ổn định hơn với chi phí thấp hơn.
 
 MEASUREMENT:
-- Chi phí chạy thử: Claude 3.5 Haiku tốn ~$0.25/$1.25 per 1M tokens, giảm thiểu 90% chi phí phát triển.
-- Độ trễ phản hồi trung bình: Haiku phản hồi trong 1.5 giây (Sonnet tốn trung bình 3.8 giây).
+- Chi phí Chat: Claude 3.5 Haiku tốn ~$0.25/$1.25 per 1M tokens, giảm thiểu 90% chi phí so với Sonnet.
+- Chi phí Quiz: Nova Pro tốn ~$0.80/$3.20 per 1M tokens, cân bằng giữa chất lượng JSON output và chi phí.
+- Độ trễ phản hồi trung bình: Haiku chat ~1.5 giây, Nova Pro quiz ~2.0 giây.
 
 TRADE-OFF ACCEPTED:
-- Chấp nhận chất lượng lập luận thấp hơn một chút so với Sonnet, tuy nhiên Haiku hoàn toàn đủ khả năng trả lời chính xác dựa trên tài liệu học tập được RAG cung cấp.
+- Chấp nhận quản lý hai mô hình riêng biệt để tối ưu chi phí và chất lượng cho từng tác vụ. Haiku phù hợp cho hỏi đáp RAG, Nova Pro phù hợp cho sinh câu hỏi trắc nghiệm cấu trúc.
 ```
 
 ### Decision Block 2: Công nghệ lưu trữ dữ liệu Database cho cấu hình Session Log
